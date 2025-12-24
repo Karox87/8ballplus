@@ -14,12 +14,8 @@ class BilliardAimApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pro Aim Tool',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF121212),
-        primaryColor: const Color(0xFF00E5FF),
-      ),
+      theme: ThemeData.dark(),
       home: const GameBrowserScreen(),
     );
   }
@@ -35,21 +31,14 @@ class GameBrowserScreen extends StatefulWidget {
 class _GameBrowserScreenState extends State<GameBrowserScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
-  bool _hasError = false;
-  bool _isControlsOpen = false;
+  bool _isMenuOpen = false;
 
-  // --- Aim Assist State ---
-  Offset _pivotPoint = const Offset(100, 450); 
-  Offset _targetPoint = const Offset(300, 300);
-  
-  // Customization
-  Color _aimColor = Colors.white;
-  double _lineWidth = 3.0; 
-  double _opacity = 0.8;
-  double _pivotScale = 1.0; 
-  double _targetScale = 1.0; 
-
-  final double _baseHandleRadius = 30.0;
+  // --- Aim Tool State ---
+  Offset _pivotPoint = const Offset(100, 600); 
+  Offset _middlePoint = const Offset(180, 520); 
+  double _lineLength = 280.0; 
+  double _circleSize = 35.0;
+  double _pathWidth = 65.0;
 
   @override
   void initState() {
@@ -59,314 +48,271 @@ class _GameBrowserScreenState extends State<GameBrowserScreen> {
 
   void _initWebView() {
     late final PlatformWebViewControllerCreationParams params;
-    
-    // ✅ FIX 1: iOS Configuration - بۆ کردنەوەی وێبسایت و گوگڵ لۆگین
     if (WebViewPlatform.instance is WebKitWebViewPlatform) {
       params = WebKitWebViewControllerCreationParams(
         allowsInlineMediaPlayback: true,
         mediaTypesRequiringUserAction: const <PlaybackMediaTypes>{},
-        // ⭐ iOS-specific settings بۆ باشترکردنی کارکردن
-        limitsNavigationsToAppBoundDomains: false,
       );
     } else {
       params = const PlatformWebViewControllerCreationParams();
     }
 
-    final WebViewController controller = WebViewController.fromPlatformCreationParams(params);
-
-    // ✅ FIX 2: UserAgent بۆ iOS - دەبێت وەکو Safari بێت بۆ گوگڵ لۆگین
-    const String iosUserAgent = 
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
-
-    controller
+    _controller = WebViewController.fromPlatformCreationParams(params)
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setUserAgent(iosUserAgent)
-      ..setBackgroundColor(const Color(0xFF121212))
+      // KEY FIX: Use a more "trusted" User Agent that mimics a real mobile Chrome browser
+      ..setUserAgent(
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/119.0.6045.193 Mobile Safari/537.36"
+      )
+      ..setBackgroundColor(Colors.black)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageStarted: (String url) {
-            setState(() { 
-              _isLoading = true; 
-              _hasError = false; 
-            });
+          onPageStarted: (url) {
+            setState(() => _isLoading = true);
+            print('📱 Started: $url');
           },
-          onPageFinished: (String url) {
-            setState(() { _isLoading = false; });
+          onPageFinished: (url) async {
+            setState(() => _isLoading = false);
+            print('✅ Finished: $url');
             
-            // ✅ FIX 3: Inject JavaScript بۆ باشترکردنی تاچ ئیڤێنتەکان لە iOS
-            controller.runJavaScript('''
+            // Fix Firebase/Google Auth session storage issues
+            await _controller.runJavaScript('''
               (function() {
-                // بەرزکردنەوەی تاچ سێنسیتیڤیتی
-                document.addEventListener('touchstart', function(e) {
-                  e.stopPropagation();
-                }, {passive: true});
-                
-                // بەرزکردنەوەی viewport بۆ iOS
-                var meta = document.querySelector('meta[name="viewport"]');
-                if (!meta) {
-                  meta = document.createElement('meta');
-                  meta.name = 'viewport';
-                  document.head.appendChild(meta);
+                try {
+                  // Enable session storage
+                  if (typeof(Storage) !== "undefined") {
+                    console.log("Storage is available");
+                  }
+                  
+                  // Fix for Firebase auth
+                  if (window.location.href.includes('oneperson.store')) {
+                    // Clear any auth errors
+                    var errors = document.querySelectorAll('[role="alert"]');
+                    errors.forEach(e => e.remove());
+                  }
+                  
+                  // Make navigator appear legitimate
+                  Object.defineProperty(navigator, 'webdriver', {
+                    get: () => false
+                  });
+                  
+                  // Fix storage access
+                  if (!window.sessionStorage) {
+                    console.error("Session storage not available");
+                  }
+                  
+                } catch(e) {
+                  console.error("Init error:", e);
                 }
-                meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
               })();
             ''');
-          },
-          onWebResourceError: (WebResourceError error) {
-            debugPrint('⚠️ WebView Error: ${error.errorCode} - ${error.description}');
-            // تەنها ئێڕەرە گەورەکان نیشان بدە
-            if (error.errorCode == -1009 || // No internet (iOS)
-                error.errorCode == -1003 || // Host not found (iOS)
-                error.errorCode == -2 ||    // Android equivalent
-                error.description.contains('NAME_NOT_RESOLVED')) {
-              setState(() { 
-                _hasError = true; 
-                _isLoading = false; 
-              });
+            
+            // If we see the Firebase error, try to reload once
+            if (url.contains('oneperson.store')) {
+              // Check for error message
+              final hasError = await _controller.runJavaScriptReturningResult(
+                'document.body.innerText.includes("missing initial state")'
+              );
+              
+              if (hasError.toString() == 'true') {
+                print('⚠️ Detected Firebase error, reloading...');
+                Future.delayed(const Duration(seconds: 1), () {
+                  _controller.reload();
+                });
+              }
             }
           },
-          onNavigationRequest: (NavigationRequest request) {
-            // ✅ FIX 4: ڕێگەدان بە هەموو نێڤیگەیشنێک بۆ گوگڵ OAuth
-            debugPrint('🔗 Navigating to: ${request.url}');
+          onWebResourceError: (error) {
+            print('❌ Error: ${error.description}');
+          },
+          onNavigationRequest: (request) {
+            print('🔗 Navigation: ${request.url}');
             return NavigationDecision.navigate;
           },
         ),
-      );
+      )
+      ..loadRequest(Uri.parse('https://oneperson.store'));
 
-    // ✅ FIX 5: Platform-specific configuration
-    if (controller.platform is AndroidWebViewController) {
+    // Android specific settings - CRITICAL for Google login
+    if (_controller.platform is AndroidWebViewController) {
       AndroidWebViewController.enableDebugging(true);
-      (controller.platform as AndroidWebViewController)
-          .setMediaPlaybackRequiresUserGesture(false);
-    } else if (controller.platform is WebKitWebViewController) {
-      // iOS-specific settings
-      (controller.platform as WebKitWebViewController)
-          .setAllowsBackForwardNavigationGestures(true);
-    }
-
-    // ✅ لۆد کردنی وێبسایت
-    controller.loadRequest(
-      Uri.parse('https://onepersone.store'),
-      headers: {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-      },
-    );
-
-    _controller = controller;
-  }
-
-  void _reloadWithUrl(String url) {
-    if (url.isEmpty) return;
-    String cleanUrl = url.trim();
-    if (!cleanUrl.startsWith('http')) {
-      cleanUrl = 'https://$cleanUrl';
-    }
-    setState(() {
-      _hasError = false;
-      _isLoading = true;
-    });
-    _controller.loadRequest(Uri.parse(cleanUrl));
-  }
-
-  // ✅ FIX 6: دوگمەی رێفرێش زیادکردن
-  void _refreshWebView() {
-    setState(() {
-      _isLoading = true;
-      _hasError = false;
-    });
-    _controller.reload();
-  }
-
-  // ✅ FIX 7: دوگمەکانی navigation
-  Future<void> _goBack() async {
-    if (await _controller.canGoBack()) {
-      await _controller.goBack();
-    }
-  }
-
-  Future<void> _goForward() async {
-    if (await _controller.canGoForward()) {
-      await _controller.goForward();
+      final androidController = _controller.platform as AndroidWebViewController;
+      
+      androidController.setMediaPlaybackRequiresUserGesture(false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final double pivotHandleSize = _baseHandleRadius * _pivotScale;
-    final double targetHandleSize = _baseHandleRadius * _targetScale;
+    double dx = _middlePoint.dx - _pivotPoint.dx;
+    double dy = _middlePoint.dy - _pivotPoint.dy;
+    double angle = math.atan2(dy, dx);
+    
+    Offset endPoint = Offset(
+      _pivotPoint.dx + math.cos(angle) * _lineLength,
+      _pivotPoint.dy + math.sin(angle) * _lineLength,
+    );
 
     return Scaffold(
-      resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
-          // 1. WEBVIEW LAYER
-          if (_hasError) 
-            _buildErrorScreen()
-          else 
-            WebViewWidget(controller: _controller),
-            
-          // Loading Bar
-          if (_isLoading && !_hasError)
-            const Positioned(
-              top: 0, left: 0, right: 0,
-              child: LinearProgressIndicator(
-                color: Color(0xFF00E5FF), 
-                backgroundColor: Colors.transparent,
-                minHeight: 4,
-              ),
-            ),
+          // 1. WEBVIEW
+          WebViewWidget(controller: _controller),
+          
+          if (_isLoading) const Center(child: CircularProgressIndicator(color: Colors.red)),
 
-          // 2. VISUAL OVERLAY
+          // 2. AIM VISUALS
           Positioned.fill(
             child: IgnorePointer(
               child: CustomPaint(
                 painter: ProAimPainter(
-                  pivotPoint: _pivotPoint,
-                  targetPoint: _targetPoint,
-                  color: _aimColor.withOpacity(_opacity),
-                  width: _lineWidth,
-                  pivotScale: _pivotScale,
-                  targetScale: _targetScale,
+                  pivot: _pivotPoint,
+                  middle: _middlePoint,
+                  end: endPoint,
+                  radius: _circleSize,
+                  pathWidth: _pathWidth,
                 ),
               ),
             ),
           ),
 
           // 3. TOUCH HANDLES
+          _buildHandle(_pivotPoint, _circleSize, (d) {
+            setState(() { _pivotPoint += d; _middlePoint += d; });
+          }),
+          _buildHandle(_middlePoint, 20, (d) => setState(() => _middlePoint += d)),
+          _buildHandle(endPoint, _circleSize, (d) {
+            setState(() {
+              Offset newEnd = endPoint + d;
+              _lineLength = (newEnd - _pivotPoint).distance;
+            });
+          }),
+
+          // 4. FLOATING BUTTONS
           Positioned(
-            left: _pivotPoint.dx - pivotHandleSize,
-            top: _pivotPoint.dy - pivotHandleSize,
-            child: GestureDetector(
-              onPanUpdate: (details) {
-                setState(() {
-                  _pivotPoint += details.delta;
-                  _targetPoint += details.delta;
-                });
-              },
-              child: Container(
-                width: pivotHandleSize * 2,
-                height: pivotHandleSize * 2,
-                color: Colors.transparent,
-              ),
+            right: 20, top: 50,
+            child: Column(
+              children: [
+                FloatingActionButton.small(
+                  heroTag: 'refresh',
+                  backgroundColor: Colors.white,
+                  child: const Icon(Icons.refresh, color: Colors.black),
+                  onPressed: () => _controller.reload(),
+                ),
+                const SizedBox(height: 10),
+                FloatingActionButton.small(
+                  heroTag: 'browser',
+                  backgroundColor: Colors.purple,
+                  child: const Icon(Icons.open_in_new, color: Colors.white),
+                  onPressed: () {
+                    // Show instructions to login in Chrome first
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Login Issue?'),
+                        content: const Text(
+                          'If login is not working:\n\n'
+                          '1. Open Chrome browser\n'
+                          '2. Go to oneperson.store\n'
+                          '3. Login with Google there\n'
+                          '4. Come back to this app\n'
+                          '5. Press the green Home button\n\n'
+                          'Your session should work then!'
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('OK'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+                FloatingActionButton.small(
+                  heroTag: 'settings',
+                  backgroundColor: Colors.cyanAccent,
+                  child: Icon(_isMenuOpen ? Icons.close : Icons.tune, color: Colors.black),
+                  onPressed: () => setState(() => _isMenuOpen = !_isMenuOpen),
+                ),
+                const SizedBox(height: 10),
+                FloatingActionButton.small(
+                  heroTag: 'back',
+                  backgroundColor: Colors.orange,
+                  child: const Icon(Icons.arrow_back, color: Colors.white),
+                  onPressed: () async {
+                    if (await _controller.canGoBack()) {
+                      _controller.goBack();
+                    }
+                  },
+                ),
+                const SizedBox(height: 10),
+                FloatingActionButton.small(
+                  heroTag: 'home',
+                  backgroundColor: Colors.green,
+                  child: const Icon(Icons.home, color: Colors.white),
+                  onPressed: () => _controller.loadRequest(Uri.parse('https://oneperson.store')),
+                ),
+              ],
             ),
           ),
 
-          Positioned(
-            left: _targetPoint.dx - targetHandleSize,
-            top: _targetPoint.dy - targetHandleSize,
-            child: GestureDetector(
-              onPanUpdate: (details) {
-                setState(() {
-                  _targetPoint += details.delta;
-                });
-              },
-              child: Container(
-                width: targetHandleSize * 2,
-                height: targetHandleSize * 2,
-                color: Colors.transparent,
-              ),
-            ),
-          ),
-
-          // 4. ✅ Navigation Controls (NEW)
-          _buildNavigationBar(),
-
-          // 5. MENU
-          _buildFloatingControls(),
+          if (_isMenuOpen) _buildSettings(),
         ],
       ),
     );
   }
 
-  // ✅ FIX 8: دوگمەکانی Navigation
-  Widget _buildNavigationBar() {
+  Widget _buildHandle(Offset pos, double r, Function(Offset) onMove) {
     return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 0,
+      left: pos.dx - (r + 15),
+      top: pos.dy - (r + 15),
+      child: GestureDetector(
+        onPanUpdate: (details) => onMove(details.delta),
+        child: Container(width: (r + 15) * 2, height: (r + 15) * 2, color: Colors.transparent),
+      ),
+    );
+  }
+
+  Widget _buildSettings() {
+    return Center(
       child: Container(
-        height: 50,
+        width: 280, 
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.8),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.3),
-              blurRadius: 10,
-              offset: const Offset(0, -2),
-            ),
-          ],
+          color: Colors.black87, 
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.cyanAccent, width: 2),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.arrow_back, color: Colors.white),
-              onPressed: _goBack,
-              tooltip: 'Back',
-            ),
-            IconButton(
-              icon: const Icon(Icons.arrow_forward, color: Colors.white),
-              onPressed: _goForward,
-              tooltip: 'Forward',
-            ),
-            IconButton(
-              icon: const Icon(Icons.refresh, color: Color(0xFF00E5FF)),
-              onPressed: _refreshWebView,
-              tooltip: 'Refresh',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildErrorScreen() {
-    final TextEditingController urlController = TextEditingController();
-    return Container(
-      color: const Color(0xFF1E1E1E),
-      padding: const EdgeInsets.symmetric(horizontal: 40),
-      child: Center(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.public_off, size: 60, color: Colors.redAccent),
-            const SizedBox(height: 20),
             const Text(
-              "ناتوانرێت وێبسایت بکرێتەوە",
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+              "TOOL DESIGN", 
+              style: TextStyle(
+                fontWeight: FontWeight.bold, 
+                fontSize: 16,
+                color: Colors.cyanAccent,
+              )
             ),
             const SizedBox(height: 10),
+            _slider("Circle Size", _circleSize / 80, (v) => setState(() => _circleSize = v * 80)),
+            _slider("Path Width", _pathWidth / 120, (v) => setState(() => _pathWidth = v * 120)),
+            const Divider(color: Colors.grey),
+            const SizedBox(height: 10),
             const Text(
-              "١. ئینتەرنێتەکەت پشکنین بکە\n٢. دڵنیابە لە پەرمیتەکان لە Info.plist\n٣. URLـێکی دیکە تاقیبکەرەوە",
+              "💡 Tip: Use orange button to go back during login",
+              style: TextStyle(fontSize: 11, color: Colors.grey),
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey, fontSize: 12),
             ),
-            const SizedBox(height: 30),
-            TextField(
-              controller: urlController,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: Colors.black45,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                hintText: "google.com تاقیبکەرەوە",
-                hintStyle: const TextStyle(color: Colors.grey),
-              ),
-            ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 15),
             ElevatedButton(
-              onPressed: () => _reloadWithUrl(
-                urlController.text.isNotEmpty ? urlController.text : "https://google.com"
-              ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00E5FF),
-                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                backgroundColor: Colors.cyanAccent,
+                foregroundColor: Colors.black,
               ),
-              child: const Text(
-                "دووبارە تاقیبکەرەوە", 
-                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 16),
-              ),
+              onPressed: () => setState(() => _isMenuOpen = false), 
+              child: const Text("CLOSE"),
             ),
           ],
         ),
@@ -374,57 +320,16 @@ class _GameBrowserScreenState extends State<GameBrowserScreen> {
     );
   }
 
-  Widget _buildFloatingControls() {
-    return Positioned(
-      right: 15, 
-      top: 50,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          FloatingActionButton.small(
-            backgroundColor: _isControlsOpen ? Colors.redAccent : const Color(0xFF00E5FF),
-            child: Icon(_isControlsOpen ? Icons.close : Icons.tune, color: Colors.black),
-            onPressed: () => setState(() => _isControlsOpen = !_isControlsOpen),
-          ),
-          if (_isControlsOpen) ...[
-            const SizedBox(height: 10),
-            Container(
-              width: 220,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white12),
-              ),
-              child: Column(
-                children: [
-                  _slider("Line Width", _lineWidth, 1, 6, (v) => _lineWidth = v),
-                  _slider("Opacity", _opacity, 0.2, 1, (v) => _opacity = v),
-                  const Divider(color: Colors.white24),
-                  _slider("Pivot Size", _pivotScale, 0.5, 2.5, (v) => _pivotScale = v),
-                  _slider("Target Size", _targetScale, 0.5, 2.5, (v) => _targetScale = v),
-                ],
-              ),
-            ),
-          ]
-        ],
-      ),
-    );
-  }
-
-  Widget _slider(String label, double val, double min, double max, Function(double) onChanged) {
+  Widget _slider(String label, double val, Function(double) onChanged) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 10)),
-        SizedBox(
-          height: 20,
-          child: Slider(
-            value: val, min: min, max: max,
-            activeColor: const Color(0xFF00E5FF),
-            inactiveColor: Colors.white10,
-            onChanged: (v) => setState(() => onChanged(v)),
-          ),
+        Text(label, style: const TextStyle(fontSize: 11, color: Colors.white70)),
+        Slider(
+          value: val, 
+          min: 0.1, 
+          max: 1.0, 
+          activeColor: Colors.cyanAccent,
+          onChanged: onChanged,
         ),
       ],
     );
@@ -432,51 +337,60 @@ class _GameBrowserScreenState extends State<GameBrowserScreen> {
 }
 
 class ProAimPainter extends CustomPainter {
-  final Offset pivotPoint;
-  final Offset targetPoint;
-  final Color color;
-  final double width;
-  final double pivotScale;
-  final double targetScale;
+  final Offset pivot, middle, end;
+  final double radius, pathWidth;
 
   ProAimPainter({
-    required this.pivotPoint, 
-    required this.targetPoint,
-    required this.color, 
-    required this.width,
-    required this.pivotScale, 
-    required this.targetScale,
+    required this.pivot, 
+    required this.middle, 
+    required this.end, 
+    required this.radius, 
+    required this.pathWidth
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = width
-      ..style = PaintingStyle.stroke;
-    final fill = Paint()
-      ..color = color
+    final shadowPaint = Paint()
+      ..color = Colors.grey.withOpacity(0.4)
       ..style = PaintingStyle.fill;
-    
-    // Line
-    double dx = targetPoint.dx - pivotPoint.dx;
-    double dy = targetPoint.dy - pivotPoint.dy;
-    double dist = math.sqrt(dx*dx + dy*dy);
-    if (dist == 0) dist = 0.1;
-    Offset end = Offset(
-      pivotPoint.dx + (dx/dist)*3000, 
-      pivotPoint.dy + (dy/dist)*3000
+    final redLine = Paint()
+      ..color = Colors.red
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+
+    double angle = math.atan2(end.dy - pivot.dy, end.dx - pivot.dx);
+    canvas.save();
+    canvas.translate(pivot.dx, pivot.dy);
+    canvas.rotate(angle);
+    canvas.drawRect(
+      Rect.fromLTWH(0, -pathWidth / 2, (end - pivot).distance, pathWidth), 
+      shadowPaint
     );
-    canvas.drawLine(pivotPoint, end, paint);
+    canvas.restore();
 
-    // Pivot (Double Circle)
-    canvas.drawCircle(pivotPoint, 6 * pivotScale, fill);
-    canvas.drawCircle(pivotPoint, 18 * pivotScale, paint);
-
-    // Target (Single Circle)
-    canvas.drawCircle(targetPoint, 10 * targetScale, fill);
+    canvas.drawLine(pivot, end, redLine);
+    _drawDashedCircle(canvas, pivot, radius);
+    _drawDashedCircle(canvas, middle, 18);
+    _drawDashedCircle(canvas, end, radius);
   }
 
-  @override
-  bool shouldRepaint(covariant ProAimPainter old) => true;
+  void _drawDashedCircle(Canvas canvas, Offset center, double r) {
+    final p = Paint()
+      ..color = Colors.red
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    for (int i = 0; i < 20; i++) {
+      double angle = (2 * math.pi / 20) * i;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: r), 
+        angle, 
+        math.pi / 20, 
+        false, 
+        p
+      );
+    }
+  }
+
+  @override 
+  bool shouldRepaint(covariant CustomPainter old) => true;
 }
