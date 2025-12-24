@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'dart:math' as math;
+import 'dart:io' show Platform;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,7 +37,7 @@ class _BrowserAppState extends State<BrowserApp> {
   double _currentAngle = -0.8;
 
   // User Agents
-  final String mobileUA = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36";
+  final String mobileUA = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
   final String desktopUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
   @override
@@ -50,6 +51,44 @@ class _BrowserAppState extends State<BrowserApp> {
       url = 'https://$url';
     }
     webViewController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+  }
+
+  // Settings گونجاو بۆ Android و iOS
+  InAppWebViewSettings _getWebViewSettings() {
+    return InAppWebViewSettings(
+      javaScriptEnabled: true,
+      domStorageEnabled: true,
+      databaseEnabled: true,
+      allowsInlineMediaPlayback: true,
+      mediaPlaybackRequiresUserGesture: false,
+      javaScriptCanOpenWindowsAutomatically: true,
+      supportMultipleWindows: true,
+      cacheEnabled: true,
+      clearCache: false,
+      thirdPartyCookiesEnabled: true,
+      userAgent: _isMobileMode ? mobileUA : desktopUA,
+      applicationNameForUserAgent: "",
+      useShouldOverrideUrlLoading: true,
+      geolocationEnabled: true,
+      transparentBackground: false,
+      
+      // Android specific
+      useHybridComposition: Platform.isAndroid,
+      mixedContentMode: Platform.isAndroid 
+          ? MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW 
+          : null,
+      
+      // iOS specific
+      limitsNavigationsToAppBoundDomains: Platform.isIOS ? false : null,
+      allowsBackForwardNavigationGestures: Platform.isIOS ? false : null,
+      suppressesIncrementalRendering: Platform.isIOS ? false : null,
+      allowsLinkPreview: Platform.isIOS ? false : null,
+      sharedCookiesEnabled: Platform.isIOS ? true : null,
+      
+      // بۆ Gmail و OAuth چارەسەر
+      allowFileAccessFromFileURLs: true,
+      allowUniversalAccessFromFileURLs: true,
+    );
   }
 
   @override
@@ -132,25 +171,7 @@ class _BrowserAppState extends State<BrowserApp> {
           // BROWSER LAYER
           InAppWebView(
             initialUrlRequest: URLRequest(url: WebUri(currentUrl)),
-            initialSettings: InAppWebViewSettings(
-              javaScriptEnabled: true,
-              domStorageEnabled: true,
-              databaseEnabled: true,
-              allowsInlineMediaPlayback: true,
-              mediaPlaybackRequiresUserGesture: false,
-              javaScriptCanOpenWindowsAutomatically: true,
-              supportMultipleWindows: true,
-              useHybridComposition: true,
-              cacheEnabled: true,
-              clearCache: false,
-              thirdPartyCookiesEnabled: true,
-              mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
-              userAgent: _isMobileMode ? mobileUA : desktopUA,
-              applicationNameForUserAgent: "",
-              useShouldOverrideUrlLoading: true,
-              geolocationEnabled: true,
-              transparentBackground: false,
-            ),
+            initialSettings: _getWebViewSettings(),
             onWebViewCreated: (controller) async {
               webViewController = controller;
               
@@ -173,11 +194,7 @@ class _BrowserAppState extends State<BrowserApp> {
                   };
                   
                   Object.defineProperty(navigator, 'languages', {
-                    get: () => ['en-US', 'en', 'ku']
-                  });
-                  
-                  Object.defineProperty(navigator, 'platform', {
-                    get: () => 'Win32'
+                    get: () => ['en-US', 'en', 'ku', 'ar']
                   });
                   
                   Object.defineProperty(navigator, 'plugins', {
@@ -220,47 +237,118 @@ class _BrowserAppState extends State<BrowserApp> {
               });
             },
             onCreateWindow: (controller, createWindowAction) async {
-              showDialog(
-                context: context,
-                builder: (context) {
-                  return Dialog(
-                    child: SizedBox(
-                      width: MediaQuery.of(context).size.width * 0.9,
-                      height: MediaQuery.of(context).size.height * 0.8,
-                      child: Column(
-                        children: [
-                          AppBar(
-                            backgroundColor: Colors.black87,
-                            title: const Text("پەنجەرەی نوێ"),
-                            leading: IconButton(
-                              icon: const Icon(Icons.close),
-                              onPressed: () => Navigator.pop(context),
-                            ),
-                          ),
-                          Expanded(
-                            child: InAppWebView(
-                              windowId: createWindowAction.windowId,
-                              initialSettings: InAppWebViewSettings(
-                                javaScriptEnabled: true,
-                                domStorageEnabled: true,
-                                thirdPartyCookiesEnabled: true,
-                                userAgent: _isMobileMode ? mobileUA : desktopUA,
-                                applicationNameForUserAgent: "",
+              try {
+                if (!mounted) return false;
+                
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (context) {
+                    return PopScope(
+                      canPop: true,
+                      child: Dialog(
+                        backgroundColor: Colors.black,
+                        insetPadding: const EdgeInsets.all(10),
+                        child: SizedBox(
+                          width: MediaQuery.of(context).size.width * 0.95,
+                          height: MediaQuery.of(context).size.height * 0.85,
+                          child: Column(
+                            children: [
+                              Container(
+                                color: Colors.black87,
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                child: Row(
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.close, color: Colors.white),
+                                      onPressed: () {
+                                        if (context.mounted) Navigator.pop(context);
+                                      },
+                                    ),
+                                    const Expanded(
+                                      child: Text(
+                                        "Login / Popup",
+                                        style: TextStyle(color: Colors.white, fontSize: 16),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 48),
+                                  ],
+                                ),
                               ),
-                              onCloseWindow: (controller) {
-                                Navigator.pop(context);
-                              },
-                            ),
+                              Expanded(
+                                child: InAppWebView(
+                                  windowId: createWindowAction.windowId,
+                                  initialSettings: _getWebViewSettings(),
+                                  onLoadError: (controller, url, code, message) {
+                                    debugPrint("Popup Load Error: $message");
+                                  },
+                                  onWebViewCreated: (popupController) async {
+                                    await popupController.evaluateJavascript(source: """
+                                      (function() {
+                                        delete window._flutter_inappwebview;
+                                        delete window.flutter_inappwebview;
+                                        delete window.flutter;
+                                      })();
+                                    """);
+                                  },
+                                  onLoadStop: (popupController, url) async {
+                                    // چێککردنی ئەگەر login تەواوبوو
+                                    final urlString = url.toString().toLowerCase();
+                                    if (urlString.contains('oauth') || 
+                                        urlString.contains('callback') ||
+                                        urlString.contains('success') ||
+                                        urlString.contains('accounts.google.com/signin/oauth/consent')) {
+                                      await Future.delayed(const Duration(milliseconds: 1500));
+                                      if (context.mounted) {
+                                        Navigator.pop(context);
+                                      }
+                                    }
+                                  },
+                                  onCloseWindow: (controller) {
+                                    if (context.mounted) {
+                                      Navigator.pop(context);
+                                    }
+                                  },
+                                  shouldOverrideUrlLoading: (controller, navigationAction) async {
+                                    // بۆ Gmail OAuth - ڕێگە بدە بە هەموو navigation ەکان
+                                    return NavigationActionPolicy.ALLOW;
+                                  },
+                                  onPermissionRequest: (controller, request) async {
+                                    return PermissionResponse(
+                                      resources: request.resources,
+                                      action: PermissionResponseAction.GRANT,
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  );
-                },
-              );
-              return true;
+                    );
+                  },
+                );
+                return true;
+              } catch (e) {
+                debugPrint("Error opening popup: $e");
+                return false;
+              }
             },
             shouldOverrideUrlLoading: (controller, navigationAction) async {
+              final uri = navigationAction.request.url;
+              if (uri == null) return NavigationActionPolicy.ALLOW;
+              
+              final urlString = uri.toString();
+              
+              // بۆ Gmail و OAuth - هەموو لینکەکان ڕێگەپێبدە
+              if (urlString.contains('accounts.google.com') ||
+                  urlString.contains('mail.google.com') ||
+                  urlString.contains('oauth') ||
+                  urlString.contains('signin')) {
+                return NavigationActionPolicy.ALLOW;
+              }
+              
               return NavigationActionPolicy.ALLOW;
             },
             onPermissionRequest: (controller, request) async {
@@ -268,6 +356,10 @@ class _BrowserAppState extends State<BrowserApp> {
                 resources: request.resources,
                 action: PermissionResponseAction.GRANT,
               );
+            },
+            onReceivedServerTrustAuthRequest: (controller, challenge) async {
+              // بۆ SSL certificates
+              return ServerTrustAuthResponse(action: ServerTrustAuthResponseAction.PROCEED);
             },
           ),
 
@@ -308,7 +400,8 @@ class _BrowserAppState extends State<BrowserApp> {
 
           // SETTINGS BUTTON
           Positioned(
-            right: 10, top: 10,
+            right: 10, 
+            top: _showAppBar ? 10 : MediaQuery.of(context).padding.top + 10,
             child: FloatingActionButton.small(
               backgroundColor: _activeColor.withOpacity(0.5),
               child: const Icon(Icons.tune, color: Colors.white, size: 18),
@@ -383,11 +476,7 @@ class _BrowserAppState extends State<BrowserApp> {
                 activeColor: _activeColor,
                 onChanged: (val) {
                   setState(() => _isMobileMode = val);
-                  webViewController?.setSettings(
-                    settings: InAppWebViewSettings(
-                      userAgent: _isMobileMode ? mobileUA : desktopUA,
-                    ),
-                  );
+                  webViewController?.setSettings(settings: _getWebViewSettings());
                   webViewController?.reload();
                 },
               ),
