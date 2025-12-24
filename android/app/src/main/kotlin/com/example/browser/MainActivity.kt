@@ -1,4 +1,4 @@
-package com.example.aimaset
+package com.example.browser
 
 import io.flutter.embedding.android.FlutterActivity
 
