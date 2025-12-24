@@ -30,14 +30,14 @@ class _BrowserAppState extends State<BrowserApp> {
   bool _showAppBar = true;
   bool _isMobileMode = false;
   Offset _pivotPoint = const Offset(150, 500);
-  double _lineLength = 320.0;
-  double _allCircleSize = 40.0;
-  double _pathOpacity = 0.4;
+  double _lineLength = 100.0;
+  double _allCircleSize = 20.0;
+  double _pathOpacity = 0.5;
   Color _activeColor = Colors.white;
   double _currentAngle = -0.8;
 
   // User Agents
-  final String mobileUA = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+  final String mobileUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
   final String desktopUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
   @override
@@ -93,9 +93,15 @@ class _BrowserAppState extends State<BrowserApp> {
 
   @override
   Widget build(BuildContext context) {
+// 1. Set the Middle Point as the absolute anchor (stored in _pivotPoint)
+    Offset middlePoint = _pivotPoint; 
+    
+    // 2. Pivot is FIXED next to the middle (gap distance)
     double gap = _allCircleSize * 2.1;
-    Offset middlePoint = _pivotPoint + Offset.fromDirection(_currentAngle, gap);
-    Offset endPoint = _pivotPoint + Offset.fromDirection(_currentAngle, _lineLength);
+    Offset pivotPoint = middlePoint + Offset.fromDirection(_currentAngle + math.pi, gap);
+    
+    // 3. End point is STRETCHABLE (uses _lineLength)
+    Offset endPoint = middlePoint + Offset.fromDirection(_currentAngle, _lineLength);
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -364,14 +370,14 @@ class _BrowserAppState extends State<BrowserApp> {
           ),
 
           // AIM ASSIST LAYER
-          if (_showAimAssist) ...[
+if (_showAimAssist) ...[
             Positioned.fill(
               child: IgnorePointer(
                 child: CustomPaint(
                   painter: ProAimPainter(
-                    pivot: _pivotPoint,
-                    middle: middlePoint,
-                    end: endPoint,
+                    pivot: pivotPoint, 
+                    middle: middlePoint, // Fixed Anchor
+                    end: endPoint,       // Stretchable
                     radius: _allCircleSize,
                     pathWidth: _allCircleSize * 1.9,
                     opacity: _pathOpacity,
@@ -381,19 +387,31 @@ class _BrowserAppState extends State<BrowserApp> {
               ),
             ),
 
-            // HANDLES
-            _buildHandle(_pivotPoint, _allCircleSize, (delta) {
-              setState(() => _pivotPoint += delta);
-            }),
+            // MIDDLE HANDLE: Drag this to move the whole UI
             _buildHandle(middlePoint, _allCircleSize, (delta) {
               setState(() => _pivotPoint += delta);
             }),
+
+            // PIVOT HANDLE: Also moves the whole UI (since it's right next to the middle)
+            _buildHandle(pivotPoint, _allCircleSize, (delta) {
+              setState(() => _pivotPoint += delta);
+            }),
+
+            // END HANDLE: This rotates AND stretches/shrinks the line
             _buildHandle(endPoint, _allCircleSize, (delta) {
               setState(() {
                 Offset newEnd = endPoint + delta;
-                _lineLength = (newEnd - _pivotPoint).distance;
-                if (_lineLength < gap + 30) _lineLength = gap + 30;
-                _currentAngle = math.atan2(newEnd.dy - _pivotPoint.dy, newEnd.dx - _pivotPoint.dx);
+                // Calculate the new distance (Stretch)
+                _lineLength = (newEnd - middlePoint).distance;
+                
+                // Calculate the new angle (Rotation)
+                _currentAngle = math.atan2(
+                  newEnd.dy - middlePoint.dy, 
+                  newEnd.dx - middlePoint.dx
+                );
+
+                // Minimum length check to prevent the circle from overlapping the middle
+                if (_lineLength < gap + 20) _lineLength = gap + 20;
               });
             }),
           ],
@@ -573,43 +591,44 @@ class ProAimPainter extends CustomPainter {
     double angle = math.atan2(end.dy - pivot.dy, end.dx - pivot.dx);
     double dist = (end - pivot).distance;
 
-    // Background Path
+    // 1. Draw the Background Path (The "Capacity")
     final pathPaint = Paint()
       ..color = Colors.white.withOpacity(opacity)
       ..style = PaintingStyle.fill;
+    
     canvas.save();
     canvas.translate(pivot.dx, pivot.dy);
     canvas.rotate(angle);
     canvas.drawRRect(
-      RRect.fromLTRBR(0, -pathWidth / 2, dist, pathWidth / 2, Radius.circular(radius * 1.5)),
+      RRect.fromLTRBR(0, -pathWidth / 2, dist, pathWidth / 2, Radius.circular(radius)),
       pathPaint,
     );
+
+    // 2. Draw the INNER LINE (The different color line inside the capacity)
+    final innerLinePaint = Paint()
+      ..color = Colors.red // Change this to any color you prefer
+      ..strokeWidth = 2.0  // Thickness of the inner line
+      ..strokeCap = StrokeCap.round;
+
+    // Drawing the line from 0 to dist inside the rotated canvas
+    canvas.drawLine(const Offset(0, 0), Offset(dist, 0), innerLinePaint);
     canvas.restore();
 
-    // Draw Circles
-    _drawCircle(canvas, pivot, radius, true);
-    _drawCircle(canvas, end, radius, true);
-    _drawCircle(canvas, middle, radius, true);
+    // 3. Draw the Circles on top
+    _drawCircle(canvas, pivot, radius);
+    _drawCircle(canvas, middle, radius);
+    _drawCircle(canvas, end, radius);
   }
 
-  void _drawCircle(Canvas canvas, Offset center, double r, bool doubleRing) {
+  void _drawCircle(Canvas canvas, Offset center, double r) {
     final p = Paint()
       ..color = color
       ..strokeWidth = 2.0
       ..style = PaintingStyle.stroke;
     
-    for (int i = 0; i < 20; i++) {
-      double a = (2 * math.pi / 20) * i;
-      canvas.drawArc(Rect.fromCircle(center: center, radius: r), a, 0.15, false, p);
-    }
-    
-    if (doubleRing) {
-      canvas.drawCircle(
-        center,
-        r - (r * 0.18),
-        p..color = color.withOpacity(0.3)..strokeWidth = 1,
-      );
-    }
+    canvas.drawCircle(center, r, p);
+    // Tiny center dot for extra precision
+    canvas.drawCircle(center, 1, p..style = PaintingStyle.fill);
   }
 
   @override
