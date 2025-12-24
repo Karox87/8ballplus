@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+// Import specific platform implementations to fix initialization errors
+
+import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 import 'dart:math' as math;
 
 void main() {
@@ -12,15 +15,16 @@ class BilliardAimApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pro Aim Assistant',
+      title: 'Pro Aim Tool',
       debugShowCheckedModeBanner: false,
-      // Dark theme for a professional look
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF121212),
-        primaryColor: Colors.tealAccent,
+        primaryColor: const Color(0xFF00E5FF),
         sliderTheme: const SliderThemeData(
           showValueIndicator: ShowValueIndicator.always,
-        )
+          thumbShape: RoundSliderThumbShape(enabledThumbRadius: 8),
+          overlayShape: RoundSliderOverlayShape(overlayRadius: 16),
+        ),
       ),
       home: const GameBrowserScreen(),
     );
@@ -37,75 +41,120 @@ class GameBrowserScreen extends StatefulWidget {
 class _GameBrowserScreenState extends State<GameBrowserScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
-  bool _hasError = false;
-  
+  bool _hasError = false; // Controls the error screen
+  bool _isControlsOpen = false;
+
   // --- Aim Assist State ---
-  Offset _pivotPoint = const Offset(100, 400); // The "Double Circle" (Cue Ball)
-  Offset _targetPoint = const Offset(300, 300); // The "Single Circle" (Aim)
+  Offset _pivotPoint = const Offset(100, 450); 
+  Offset _targetPoint = const Offset(300, 300);
   
-  // Customization State
+  // Customization
   Color _aimColor = Colors.white;
   double _lineWidth = 3.0; 
   double _opacity = 0.8;
-  double _circleScale = 1.0; // New: Scale factor for circles (0.5x to 2.5x)
-  bool _isControlsOpen = false;
+  double _pivotScale = 1.0;  // Size of Double Circle
+  double _targetScale = 1.0; // Size of Single Circle
 
-  // Base radius for touch handles, will be multiplied by scale
-  final double _baseHandleRadius = 22.0; 
+  final double _baseHandleRadius = 25.0; 
 
   @override
   void initState() {
     super.initState();
-    // Initialize WebView
-    _controller = WebViewController()
+    _initWebView();
+  }
+
+  void _initWebView() {
+    // Platform-specific initialization parameters
+    late final PlatformWebViewControllerCreationParams params;
+    if (WebViewPlatform.instance is WebKitWebViewPlatform) {
+      params = WebKitWebViewControllerCreationParams(
+        allowsInlineMediaPlayback: true,
+       // mediaTypesRequiringUserAction: const <PlaybackTier>{},
+      );
+    } else {
+      params = const PlatformWebViewControllerCreationParams();
+    }
+
+    final WebViewController controller = WebViewController.fromPlatformCreationParams(params);
+
+    // FIX GOOGLE LOGIN: Use a real Android phone UserAgent
+    const String proUserAgent = 
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36";
+
+    controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0x00000000))
+      ..setUserAgent(proUserAgent) 
+      ..setBackgroundColor(const Color(0xFF121212))
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (String url) {
-            setState(() { _isLoading = true; _hasError = false; });
+            setState(() { 
+              _isLoading = true; 
+              _hasError = false; 
+            });
           },
           onPageFinished: (String url) {
             setState(() { _isLoading = false; });
           },
           onWebResourceError: (WebResourceError error) {
-            setState(() { _hasError = true; _isLoading = false; });
+            // CRITICAL FIX: Capture ERR_NAME_NOT_RESOLVED
+            // We only show the error screen if the Main Frame fails
+            if (error.isForMainFrame ?? true) {
+              setState(() {
+                _hasError = true;
+                _isLoading = false;
+              });
+            }
           },
           onNavigationRequest: (NavigationRequest request) {
             return NavigationDecision.navigate;
           },
         ),
       )
-      // Using google as default just to show it works, as onepersone.store is down
-      ..loadRequest(Uri.parse('https://www.google.com/search?q=play+billiard+online')); 
+      // We try the user's URL, but if it fails, the onWebResourceError above handles it.
+      ..loadRequest(Uri.parse('https://onepersone.store'));
+
+    _controller = controller;
   }
 
   void _reloadWithUrl(String url) {
     if (url.isEmpty) return;
-    if (!url.startsWith('http')) {
-      url = 'https://$url';
+    String cleanUrl = url.trim();
+    if (!cleanUrl.startsWith('http')) {
+      cleanUrl = 'https://$cleanUrl';
     }
-    _controller.loadRequest(Uri.parse(url));
-    setState(() { _hasError = false; _isLoading = true;});
+    setState(() {
+      _hasError = false;
+      _isLoading = true;
+    });
+    _controller.loadRequest(Uri.parse(cleanUrl));
   }
 
   @override
   Widget build(BuildContext context) {
-    // Calculate current handle size based on scale scale
-    final double currentHandleRadius = _baseHandleRadius * _circleScale;
+    final double pivotHandleSize = _baseHandleRadius * _pivotScale;
+    final double targetHandleSize = _baseHandleRadius * _targetScale;
 
     return Scaffold(
-      resizeToAvoidBottomInset: false, // Prevents webview resize when keyboard opens
+      resizeToAvoidBottomInset: false, 
       body: Stack(
         children: [
-          // 1. WEBVIEW LAYER
+          // 1. WEBVIEW LAYER (Only show if no error)
           if (_hasError) 
             _buildErrorScreen()
           else 
             WebViewWidget(controller: _controller),
             
-          if (_isLoading)
-            const Center(child: CircularProgressIndicator(color: Colors.tealAccent)),
+          // Loading Bar
+          if (_isLoading && !_hasError)
+            const Positioned(
+              top: 0, left: 0, right: 0,
+              child: LinearProgressIndicator(
+                color: Color(0xFF00E5FF), 
+                backgroundColor: Colors.transparent,
+                minHeight: 4,
+              ),
+            ),
 
           // 2. AIM OVERLAY LAYER
           Positioned.fill(
@@ -116,87 +165,78 @@ class _GameBrowserScreenState extends State<GameBrowserScreen> {
                   targetPoint: _targetPoint,
                   color: _aimColor.withOpacity(_opacity),
                   width: _lineWidth,
-                  circleScale: _circleScale, // Pass scale to painter
+                  pivotScale: _pivotScale,
+                  targetScale: _targetScale,
                 ),
               ),
             ),
           ),
 
-          // 3. GESTURE HANDLES
+          // 3. TOUCH HANDLES (Controls)
           
-          // -- Handle A: DOUBLE CIRCLE (Pivot) --
+          // Pivot Handle (Double Circle)
           Positioned(
-            left: _pivotPoint.dx - currentHandleRadius,
-            top: _pivotPoint.dy - currentHandleRadius,
+            left: _pivotPoint.dx - pivotHandleSize,
+            top: _pivotPoint.dy - pivotHandleSize,
             child: GestureDetector(
-              // Using PanUpdate for smooth dragging
               onPanUpdate: (details) {
                 setState(() {
-                  // Move both points together
                   _pivotPoint += details.delta;
                   _targetPoint += details.delta;
                 });
               },
               child: Container(
-                width: currentHandleRadius * 2,
-                height: currentHandleRadius * 2,
-                decoration: const BoxDecoration(
-                  color: Colors.transparent, // Invisible touch zone
-                  shape: BoxShape.circle,
-                ),
+                width: pivotHandleSize * 2,
+                height: pivotHandleSize * 2,
+                color: Colors.transparent,
               ),
             ),
           ),
 
-          // -- Handle B: SINGLE CIRCLE (Rotate) --
+          // Target Handle (Single Circle)
           Positioned(
-            left: _targetPoint.dx - currentHandleRadius,
-            top: _targetPoint.dy - currentHandleRadius,
+            left: _targetPoint.dx - targetHandleSize,
+            top: _targetPoint.dy - targetHandleSize,
             child: GestureDetector(
               onPanUpdate: (details) {
                 setState(() {
-                  // Only move target point
                   _targetPoint += details.delta;
                 });
               },
               child: Container(
-                width: currentHandleRadius * 2,
-                height: currentHandleRadius * 2,
-                decoration: const BoxDecoration(
-                  color: Colors.transparent,
-                  shape: BoxShape.circle,
-                ),
+                width: targetHandleSize * 2,
+                height: targetHandleSize * 2,
+                color: Colors.transparent,
               ),
             ),
           ),
 
-          // 4. FLOATING TOOLS MENU
+          // 4. FLOATING MENU
           _buildFloatingControls(),
         ],
       ),
     );
   }
 
-  // --- Widgets ---
-
+  // --- ERROR SCREEN ---
   Widget _buildErrorScreen() {
     final TextEditingController urlController = TextEditingController();
     return Container(
       color: const Color(0xFF1E1E1E),
-      padding: const EdgeInsets.all(30),
+      padding: const EdgeInsets.symmetric(horizontal: 40),
       child: Center(
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 60, color: Colors.redAccent),
+            const Icon(Icons.wifi_off_outlined, size: 80, color: Colors.redAccent),
             const SizedBox(height: 20),
             const Text(
-              "Website Error",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+              "Website Not Found",
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
             ),
             const SizedBox(height: 10),
             const Text(
-              "The default website could not be loaded. Please enter a valid game URL.",
+              "The address 'onepersone.store' could not be resolved.\nIt may be offline or typed incorrectly.",
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey),
             ),
@@ -206,98 +246,85 @@ class _GameBrowserScreenState extends State<GameBrowserScreen> {
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 filled: true,
-                fillColor: Colors.black54,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                labelText: "Enter URL (e.g., google.com)",
-                labelStyle: const TextStyle(color: Colors.tealAccent),
-                prefixIcon: const Icon(Icons.link, color: Colors.tealAccent),
+                fillColor: Colors.black45,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                hintText: "Enter a valid URL (e.g. google.com)",
+                hintStyle: const TextStyle(color: Colors.grey),
+                prefixIcon: const Icon(Icons.link, color: Color(0xFF00E5FF)),
               ),
             ),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () => _reloadWithUrl(urlController.text),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.tealAccent,
+                backgroundColor: const Color(0xFF00E5FF),
                 foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
               ),
-              child: const Text("Load URL"),
-            )
+              child: const Text("TRY AGAIN", style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
           ],
         ),
       ),
     );
   }
 
+  // --- SETTINGS MENU ---
   Widget _buildFloatingControls() {
     return Positioned(
-      right: 16,
-      top: 40,
+      right: 15,
+      top: 50,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          // Toggle Button
           FloatingActionButton.small(
-            backgroundColor: _isControlsOpen ? Colors.redAccent : Colors.tealAccent,
-            child: Icon(_isControlsOpen ? Icons.close : Icons.settings, color: Colors.black),
+            backgroundColor: _isControlsOpen ? Colors.redAccent : const Color(0xFF00E5FF),
+            child: Icon(_isControlsOpen ? Icons.close : Icons.tune, color: Colors.black),
             onPressed: () => setState(() => _isControlsOpen = !_isControlsOpen),
           ),
           
           if (_isControlsOpen) ...[
             const SizedBox(height: 12),
-            // Controls Container
             Container(
-              width: 220,
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+              width: 250,
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.black87.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white12),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 10)]
+                color: const Color(0xE6121212), // 90% opacity black
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white24),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text("AIM SETTINGS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.1)),
-                  const Divider(color: Colors.white24, height: 20),
-                  
-                  // Color Picker
+                  _header("VISUALS"),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       _colorDot(Colors.white),
-                      _colorDot(Colors.redAccent),
+                      _colorDot(const Color(0xFF00E5FF)), // Cyan
                       _colorDot(Colors.greenAccent),
-                      _colorDot(Colors.cyanAccent),
+                      _colorDot(Colors.redAccent),
                       _colorDot(Colors.yellowAccent),
                     ],
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 15),
+                  _slider("Line Thickness", _lineWidth, 1, 8, (v) => _lineWidth = v),
+                  _slider("Opacity", _opacity, 0.1, 1, (v) => _opacity = v),
                   
-                  // Sliders using custom theme for labels
-                  _buildSliderLabel("Line Thickness", _lineWidth.toStringAsFixed(1)),
-                  Slider(
-                    value: _lineWidth, min: 1.0, max: 8.0,
-                    activeColor: Colors.tealAccent, inactiveColor: Colors.white24,
-                    label: _lineWidth.toStringAsFixed(1),
-                    onChanged: (v) => setState(() => _lineWidth = v),
-                  ),
-
-                  _buildSliderLabel("Circle Size", "${(_circleScale * 100).toInt()}%"),
-                  Slider(
-                    value: _circleScale, min: 0.5, max: 2.5, // Scale from 50% to 250%
-                    activeColor: Colors.tealAccent, inactiveColor: Colors.white24,
-                    label: "${(_circleScale * 100).toInt()}%",
-                    onChanged: (v) => setState(() => _circleScale = v),
-                  ),
-
-                  _buildSliderLabel("Opacity", "${(_opacity * 100).toInt()}%"),
-                  Slider(
-                    value: _opacity, min: 0.1, max: 1.0,
-                    activeColor: Colors.tealAccent, inactiveColor: Colors.white24,
-                    label: "${(_opacity * 100).toInt()}%",
-                    onChanged: (v) => setState(() => _opacity = v),
-                  ),
+                  const SizedBox(height: 15),
+                  _header("SIZING (INDEPENDENT)"),
+                  _slider("Pivot Size (Double)", _pivotScale, 0.5, 3.0, (v) => _pivotScale = v),
+                  _slider("Aim Size (Single)", _targetScale, 0.5, 3.0, (v) => _targetScale = v),
+                  
+                  const SizedBox(height: 10),
+                  // Quick link to reload default if stuck
+                  Center(
+                    child: TextButton(
+                      onPressed: () => _reloadWithUrl("https://www.google.com"),
+                      child: const Text("Reset to Google", style: TextStyle(color: Colors.grey, fontSize: 10)),
+                    ),
+                  )
                 ],
               ),
             ),
@@ -307,106 +334,93 @@ class _GameBrowserScreenState extends State<GameBrowserScreen> {
     );
   }
 
-  Widget _buildSliderLabel(String title, String value) {
-     return Padding(
-       padding: const EdgeInsets.only(left: 8.0, right: 8.0, top: 4.0),
-       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(title, style: TextStyle(color: Colors.grey[400], fontSize: 11)),
-          Text(value, style: const TextStyle(color: Colors.tealAccent, fontSize: 11, fontWeight: FontWeight.bold)),
-        ],
-           ),
-     );
+  Widget _header(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(text, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2)),
+    );
+  }
+
+  Widget _slider(String label, double val, double min, double max, Function(double) onChanged) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(color: Colors.grey[400], fontSize: 10)),
+        SizedBox(
+          height: 30,
+          child: Slider(
+            value: val, min: min, max: max,
+            activeColor: const Color(0xFF00E5FF),
+            inactiveColor: Colors.white12,
+            onChanged: (v) => setState(() => onChanged(v)),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _colorDot(Color c) {
     bool isSelected = _aimColor == c;
     return GestureDetector(
       onTap: () => setState(() => _aimColor = c),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: isSelected ? 28 : 24,
-        height: isSelected ? 28 : 24,
+      child: Container(
+        width: 24, height: 24,
         decoration: BoxDecoration(
           color: c,
           shape: BoxShape.circle,
-          border: Border.all(color: isSelected ? Colors.tealAccent : Colors.transparent, width: 2.5),
-          boxShadow: isSelected ? [BoxShadow(color: c.withOpacity(0.6), blurRadius: 8)] : null,
+          border: isSelected ? Border.all(color: Colors.white, width: 2) : null,
+          boxShadow: isSelected ? [BoxShadow(color: c.withOpacity(0.5), blurRadius: 6)] : null,
         ),
       ),
     );
   }
 }
 
-// --- Professional Aim Painter ---
+// --- PAINTER (Graphics) ---
 class ProAimPainter extends CustomPainter {
   final Offset pivotPoint;
   final Offset targetPoint;
   final Color color;
   final double width;
-  final double circleScale; // Add scale factor
-
-  // Base radii constants
-  static const double _basePivotInner = 5.0;
-  static const double _basePivotOuter = 16.0;
-  static const double _baseTarget = 9.0;
+  final double pivotScale;
+  final double targetScale;
 
   ProAimPainter({
     required this.pivotPoint,
     required this.targetPoint,
     required this.color,
     required this.width,
-    required this.circleScale,
+    required this.pivotScale,
+    required this.targetScale,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paintFill = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-
-    final paintStroke = Paint()
+    final fill = Paint()..color = color..style = PaintingStyle.fill;
+    final stroke = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(1.5, width * 0.3); // Scale stroke slightly with line width
+      ..strokeWidth = math.max(1.5, width * 0.4);
 
-    // 1. Calculate Infinite Line Vector
+    // 1. Aim Line (Infinite)
     double dx = targetPoint.dx - pivotPoint.dx;
     double dy = targetPoint.dy - pivotPoint.dy;
-    double distance = math.sqrt(dx * dx + dy * dy);
+    double dist = math.sqrt(dx*dx + dy*dy);
+    if(dist == 0) dist = 1;
     
-    // Avoid division by zero if points are on top of each other
-    if (distance < 1.0) distance = 1.0;
+    // Extrapolate line 3000px outward
+    Offset end = Offset(pivotPoint.dx + (dx/dist) * 3000, pivotPoint.dy + (dy/dist) * 3000);
     
-    double unitX = dx / distance;
-    double unitY = dy / distance;
+    canvas.drawLine(pivotPoint, end, Paint()..color = color..strokeWidth = width..strokeCap = StrokeCap.round);
 
-    // Extend very far
-    Offset extendedPoint = Offset(
-      pivotPoint.dx + unitX * 3000,
-      pivotPoint.dy + unitY * 3000,
-    );
+    // 2. Pivot (Double Circle)
+    canvas.drawCircle(pivotPoint, 5.0 * pivotScale, fill); // Inner
+    canvas.drawCircle(pivotPoint, 16.0 * pivotScale, stroke); // Outer
 
-    // 2. Draw Aim Line
-    canvas.drawLine(pivotPoint, extendedPoint, Paint()..color = color..strokeWidth = width..strokeCap = StrokeCap.round);
-
-    // 3. Draw "Double Circle" at Pivot (Scaled)
-    // Inner Solid
-    canvas.drawCircle(pivotPoint, _basePivotInner * circleScale, paintFill); 
-    // Outer Ring
-    canvas.drawCircle(pivotPoint, _basePivotOuter * circleScale, paintStroke); 
-
-    // 4. Draw "Single Circle" at Target (Scaled)
-    canvas.drawCircle(targetPoint, _baseTarget * circleScale, paintFill);
+    // 3. Target (Single Circle)
+    canvas.drawCircle(targetPoint, 9.0 * targetScale, fill);
   }
 
   @override
-  bool shouldRepaint(covariant ProAimPainter old) {
-    return old.pivotPoint != pivotPoint || 
-           old.targetPoint != targetPoint ||
-           old.color != color || 
-           old.width != width ||
-           old.circleScale != circleScale; // Repaint if scale changes
-  }
+  bool shouldRepaint(covariant ProAimPainter old) => true;
 }
