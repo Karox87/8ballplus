@@ -46,7 +46,7 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	
-	<!-- ئەمەی خوارەوە زیادکراوە -->
+	<!-- Network & Security -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -54,5 +54,49 @@
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
 		<true/>
 	</dict>
+	
+	<!-- ===== زیادکراوە بۆ OAuth و URL Launching ===== -->
+	
+	<!-- ڕێگەپێدان بۆ کردنەوەی URLs لە Safari/Chrome -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>https</string>
+		<string>http</string>
+		<string>googlechrome</string>
+		<string>googlechromes</string>
+		<string>safari</string>
+		<string>mailto</string>
+	</array>
+	
+	<!-- بۆ OAuth Callback - گەڕانەوە بۆ ئەپەکە پاش login -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.yourdomain.browser</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<!-- ئەم scheme-ە دەگۆڕیت بە bundle identifier-ی ئەپەکەت -->
+				<string>com.yourdomain.browser</string>
+			</array>
+		</dict>
+	</array>
+	
+	<!-- بۆ InAppWebView لە iOS -->
+	<key>io.flutter.embedded_views_preview</key>
+	<true/>
+	
+	<!-- بۆ Camera/Microphone ئەگەر پێویستت بوو -->
+	<key>NSCameraUsageDescription</key>
+	<string>ئەم ئەپە پێویستی بە کامێرا هەیە بۆ وێبسایتەکان</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>ئەم ئەپە پێویستی بە مایکرۆفۆن هەیە بۆ وێبسایتەکان</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>ئەم ئەپە پێویستی بە شوێن هەیە بۆ وێبسایتەکان</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ئەم ئەپە پێویستی بە وێنەکان هەیە بۆ upload کردن</string>
+	
 </dict>
 </plist>

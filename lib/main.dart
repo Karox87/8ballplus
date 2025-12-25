@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'dart:math' as math;
 import 'dart:io' show Platform;
+import 'package:url_launcher/url_launcher.dart'; // پێویستە بیخەیتە pubspec.yaml
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -53,7 +54,53 @@ class _BrowserAppState extends State<BrowserApp> {
     webViewController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
   }
 
-  // Settings گونجاو بۆ Android و iOS
+  // چارەسەری OAuth بۆ iOS - کردنەوەی لە Safari/System Browser
+  Future<void> _handleOAuthUrl(String url) async {
+    try {
+      if (Platform.isIOS && (url.contains('accounts.google.com/signin') || 
+          url.contains('oauth') || 
+          url.contains('accounts.google.com/o/oauth2') ||
+          url.contains('accounts.google.com/ServiceLogin'))) {
+        
+        // کردنەوەی لە Safari یان Chrome بەجێی InAppWebView
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(
+            uri,
+            mode: LaunchMode.externalApplication, // دەیکاتەوە لە Safari
+          );
+          
+          // پیشاندانی مەسێجێک بە یوزەر
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('تکایە لە Safari login بکە، پاشان بگەڕێوە بۆ ئەپ'),
+                duration: const Duration(seconds: 4),
+                backgroundColor: Colors.blue[800],
+                action: SnackBarAction(
+                  label: 'باشە',
+                  textColor: Colors.white,
+                  onPressed: () {},
+                ),
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("Error launching OAuth URL: $e");
+      // ئەگەر کێشەیەک هەبوو، هەوڵ بدە لە InAppWebView بیکەیتەوە
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('کێشە هەیە لە کردنەوەی Safari. تکایە دووبارە هەوڵ بدەرەوە'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   InAppWebViewSettings _getWebViewSettings() {
     return InAppWebViewSettings(
       javaScriptEnabled: true,
@@ -78,14 +125,15 @@ class _BrowserAppState extends State<BrowserApp> {
           ? MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW 
           : null,
       
-      // iOS specific
+      // iOS specific - چاککراوە بۆ OAuth
       limitsNavigationsToAppBoundDomains: Platform.isIOS ? false : null,
-      allowsBackForwardNavigationGestures: Platform.isIOS ? false : null,
+      allowsBackForwardNavigationGestures: Platform.isIOS ? true : null,
       suppressesIncrementalRendering: Platform.isIOS ? false : null,
       allowsLinkPreview: Platform.isIOS ? false : null,
       sharedCookiesEnabled: Platform.isIOS ? true : null,
+      // گرنگ بۆ iOS OAuth
+      allowingReadAccessTo: Platform.isIOS ? WebUri("https://") : null,
       
-      // بۆ Gmail و OAuth چارەسەر
       allowFileAccessFromFileURLs: true,
       allowUniversalAccessFromFileURLs: true,
     );
@@ -93,21 +141,16 @@ class _BrowserAppState extends State<BrowserApp> {
 
   @override
   Widget build(BuildContext context) {
-// 1. Set the Middle Point as the absolute anchor (stored in _pivotPoint)
     Offset middlePoint = _pivotPoint; 
-    
-    // 2. Pivot is FIXED next to the middle (gap distance)
     double gap = _allCircleSize * 2.1;
     Offset pivotPoint = middlePoint + Offset.fromDirection(_currentAngle + math.pi, gap);
-    
-    // 3. End point is STRETCHABLE (uses _lineLength)
     Offset endPoint = middlePoint + Offset.fromDirection(_currentAngle, _lineLength);
 
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: _showAppBar ? AppBar(
         backgroundColor: Colors.black87,
-        title: const Text("بڕاوسەر + Aim Assist", style: TextStyle(color: Colors.white, fontSize: 16)),
+        title: const Text("بڕاوسڕ + Aim Assist", style: TextStyle(color: Colors.white, fontSize: 16)),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(60),
           child: Column(
@@ -181,7 +224,6 @@ class _BrowserAppState extends State<BrowserApp> {
             onWebViewCreated: (controller) async {
               webViewController = controller;
               
-              // JavaScript injection بۆ شاردنەوەی WebView
               await controller.evaluateJavascript(source: """
                 (function() {
                   delete window._flutter_inappwebview;
@@ -242,10 +284,21 @@ class _BrowserAppState extends State<BrowserApp> {
                 this.progress = progress / 100;
               });
             },
+            // چارەسەری سەرەکی بۆ OAuth لە iOS
             onCreateWindow: (controller, createWindowAction) async {
               try {
                 if (!mounted) return false;
                 
+                final requestUrl = createWindowAction.request.url?.toString() ?? '';
+                
+                // ئەگەر OAuth URLـێکە لە iOS، بیکەوە لە Safari
+                if (Platform.isIOS && (requestUrl.contains('accounts.google.com') || 
+                    requestUrl.contains('oauth'))) {
+                  await _handleOAuthUrl(requestUrl);
+                  return true;
+                }
+                
+                // بۆ پۆپئەپەکانی دیکە، وەک پێشتر
                 showDialog(
                   context: context,
                   barrierDismissible: false,
@@ -286,25 +339,11 @@ class _BrowserAppState extends State<BrowserApp> {
                                 child: InAppWebView(
                                   windowId: createWindowAction.windowId,
                                   initialSettings: _getWebViewSettings(),
-                                  onLoadError: (controller, url, code, message) {
-                                    debugPrint("Popup Load Error: $message");
-                                  },
-                                  onWebViewCreated: (popupController) async {
-                                    await popupController.evaluateJavascript(source: """
-                                      (function() {
-                                        delete window._flutter_inappwebview;
-                                        delete window.flutter_inappwebview;
-                                        delete window.flutter;
-                                      })();
-                                    """);
-                                  },
                                   onLoadStop: (popupController, url) async {
-                                    // چێککردنی ئەگەر login تەواوبوو
                                     final urlString = url.toString().toLowerCase();
                                     if (urlString.contains('oauth') || 
                                         urlString.contains('callback') ||
-                                        urlString.contains('success') ||
-                                        urlString.contains('accounts.google.com/signin/oauth/consent')) {
+                                        urlString.contains('success')) {
                                       await Future.delayed(const Duration(milliseconds: 1500));
                                       if (context.mounted) {
                                         Navigator.pop(context);
@@ -317,14 +356,7 @@ class _BrowserAppState extends State<BrowserApp> {
                                     }
                                   },
                                   shouldOverrideUrlLoading: (controller, navigationAction) async {
-                                    // بۆ Gmail OAuth - ڕێگە بدە بە هەموو navigation ەکان
                                     return NavigationActionPolicy.ALLOW;
-                                  },
-                                  onPermissionRequest: (controller, request) async {
-                                    return PermissionResponse(
-                                      resources: request.resources,
-                                      action: PermissionResponseAction.GRANT,
-                                    );
                                   },
                                 ),
                               ),
@@ -347,12 +379,13 @@ class _BrowserAppState extends State<BrowserApp> {
               
               final urlString = uri.toString();
               
-              // بۆ Gmail و OAuth - هەموو لینکەکان ڕێگەپێبدە
-              if (urlString.contains('accounts.google.com') ||
-                  urlString.contains('mail.google.com') ||
-                  urlString.contains('oauth') ||
-                  urlString.contains('signin')) {
-                return NavigationActionPolicy.ALLOW;
+              // لە iOS، OAuth URLs بکەرەوە لە Safari
+              if (Platform.isIOS && 
+                  navigationAction.navigationType == NavigationType.LINK_ACTIVATED &&
+                  (urlString.contains('accounts.google.com/signin') ||
+                   urlString.contains('accounts.google.com/o/oauth2'))) {
+                await _handleOAuthUrl(urlString);
+                return NavigationActionPolicy.CANCEL;
               }
               
               return NavigationActionPolicy.ALLOW;
@@ -364,20 +397,19 @@ class _BrowserAppState extends State<BrowserApp> {
               );
             },
             onReceivedServerTrustAuthRequest: (controller, challenge) async {
-              // بۆ SSL certificates
               return ServerTrustAuthResponse(action: ServerTrustAuthResponseAction.PROCEED);
             },
           ),
 
           // AIM ASSIST LAYER
-if (_showAimAssist) ...[
+          if (_showAimAssist) ...[
             Positioned.fill(
               child: IgnorePointer(
                 child: CustomPaint(
                   painter: ProAimPainter(
                     pivot: pivotPoint, 
-                    middle: middlePoint, // Fixed Anchor
-                    end: endPoint,       // Stretchable
+                    middle: middlePoint,
+                    end: endPoint,
                     radius: _allCircleSize,
                     pathWidth: _allCircleSize * 1.9,
                     opacity: _pathOpacity,
@@ -387,30 +419,24 @@ if (_showAimAssist) ...[
               ),
             ),
 
-            // MIDDLE HANDLE: Drag this to move the whole UI
             _buildHandle(middlePoint, _allCircleSize, (delta) {
               setState(() => _pivotPoint += delta);
             }),
 
-            // PIVOT HANDLE: Also moves the whole UI (since it's right next to the middle)
             _buildHandle(pivotPoint, _allCircleSize, (delta) {
               setState(() => _pivotPoint += delta);
             }),
 
-            // END HANDLE: This rotates AND stretches/shrinks the line
             _buildHandle(endPoint, _allCircleSize, (delta) {
               setState(() {
                 Offset newEnd = endPoint + delta;
-                // Calculate the new distance (Stretch)
                 _lineLength = (newEnd - middlePoint).distance;
                 
-                // Calculate the new angle (Rotation)
                 _currentAngle = math.atan2(
                   newEnd.dy - middlePoint.dy, 
                   newEnd.dx - middlePoint.dx
                 );
 
-                // Minimum length check to prevent the circle from overlapping the middle
                 if (_lineLength < gap + 20) _lineLength = gap + 20;
               });
             }),
@@ -468,7 +494,6 @@ if (_showAimAssist) ...[
               ),
               const Divider(color: Colors.white24),
               
-              // Show/Hide Aim Assist
               SwitchListTile(
                 title: const Text("پیشاندانی Aim Assist", style: TextStyle(fontSize: 13, color: Colors.white)),
                 value: _showAimAssist,
@@ -476,7 +501,6 @@ if (_showAimAssist) ...[
                 onChanged: (val) => setState(() => _showAimAssist = val),
               ),
               
-              // Show/Hide AppBar
               SwitchListTile(
                 title: const Text("پیشاندانی Navigation Bar", style: TextStyle(fontSize: 13, color: Colors.white)),
                 value: _showAppBar,
@@ -484,7 +508,6 @@ if (_showAimAssist) ...[
                 onChanged: (val) => setState(() => _showAppBar = val),
               ),
               
-              // Mobile/Desktop Mode
               SwitchListTile(
                 title: Text(
                   _isMobileMode ? "مۆبایل مۆد 📱" : "دێسکتۆپ مۆد 💻",
@@ -591,7 +614,6 @@ class ProAimPainter extends CustomPainter {
     double angle = math.atan2(end.dy - pivot.dy, end.dx - pivot.dx);
     double dist = (end - pivot).distance;
 
-    // 1. Draw the Background Path (The "Capacity")
     final pathPaint = Paint()
       ..color = Colors.white.withOpacity(opacity)
       ..style = PaintingStyle.fill;
@@ -604,17 +626,14 @@ class ProAimPainter extends CustomPainter {
       pathPaint,
     );
 
-    // 2. Draw the INNER LINE (The different color line inside the capacity)
     final innerLinePaint = Paint()
-      ..color = Colors.red // Change this to any color you prefer
-      ..strokeWidth = 2.0  // Thickness of the inner line
+      ..color = Colors.red
+      ..strokeWidth = 2.0
       ..strokeCap = StrokeCap.round;
 
-    // Drawing the line from 0 to dist inside the rotated canvas
     canvas.drawLine(const Offset(0, 0), Offset(dist, 0), innerLinePaint);
     canvas.restore();
 
-    // 3. Draw the Circles on top
     _drawCircle(canvas, pivot, radius);
     _drawCircle(canvas, middle, radius);
     _drawCircle(canvas, end, radius);
@@ -627,7 +646,6 @@ class ProAimPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
     
     canvas.drawCircle(center, r, p);
-    // Tiny center dot for extra precision
     canvas.drawCircle(center, 1, p..style = PaintingStyle.fill);
   }
 
