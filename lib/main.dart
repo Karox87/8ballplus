@@ -1,17 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'dart:io' show Platform;
+import 'dart:io';
 
-void main() {
-  // بۆ iOS تایبەت پێویستە ئەم ڕێکخستنە
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   if (Platform.isIOS) {
-    InAppWebViewController.setWebContentsDebuggingEnabled(true);
+    await InAppWebViewController.setWebContentsDebuggingEnabled(true);
   }
   
   runApp(MaterialApp(
+    debugShowCheckedModeBanner: false,
     home: const BrowserApp(),
     theme: ThemeData(
       colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
@@ -22,6 +22,7 @@ void main() {
 
 class BrowserApp extends StatefulWidget {
   const BrowserApp({super.key});
+  
   @override
   State<BrowserApp> createState() => _BrowserAppState();
 }
@@ -34,9 +35,7 @@ class _BrowserAppState extends State<BrowserApp> {
   bool canGoBack = false;
   bool canGoForward = false;
   bool isSecure = true;
-  
-  // بۆ کۆنترۆڵی popup windows
-  final List<PopupWebView> _popups = [];
+  bool isLoading = true;
 
   @override
   void initState() {
@@ -48,6 +47,9 @@ class _BrowserAppState extends State<BrowserApp> {
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       url = 'https://$url';
     }
+    setState(() {
+      isLoading = true;
+    });
     webViewController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
   }
 
@@ -56,70 +58,65 @@ class _BrowserAppState extends State<BrowserApp> {
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        bottom: false,
         child: Column(
           children: [
-            // Navigation Bar - iOS Style
+            // Navigation Bar
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
+                border: Border(
+                  bottom: BorderSide(
+                    color: Colors.grey.shade300,
+                    width: 0.5,
                   ),
-                ],
+                ),
               ),
               child: Column(
                 children: [
                   // Progress Bar
-                  if (progress < 1.0)
-                    LinearProgressIndicator(
-                      value: progress,
-                      backgroundColor: Colors.grey[200],
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                        Colors.blue,
+                  if (progress < 1.0 && isLoading)
+                    SizedBox(
+                      height: 3,
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        backgroundColor: Colors.grey[200],
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          Colors.blue,
+                        ),
                       ),
-                      minHeight: 2,
                     ),
                   
-                  // URL Bar و Navigation Buttons
+                  // URL Bar
                   Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 8,
-                    ),
+                    padding: const EdgeInsets.all(12.0),
                     child: Row(
                       children: [
                         // Back Button
-                        CupertinoButton(
-                          padding: EdgeInsets.zero,
+                        IconButton(
+                          icon: Icon(
+                            Icons.arrow_back_ios,
+                            color: canGoBack
+                                ? Colors.blue
+                                : Colors.grey.shade400,
+                            size: 22,
+                          ),
                           onPressed: canGoBack
                               ? () => webViewController?.goBack()
                               : null,
-                          child: Icon(
-                            CupertinoIcons.back,
-                            color: canGoBack
-                                ? CupertinoColors.activeBlue
-                                : CupertinoColors.systemGrey,
-                            size: 28,
-                          ),
                         ),
                         
                         // Forward Button
-                        CupertinoButton(
-                          padding: EdgeInsets.zero,
+                        IconButton(
+                          icon: Icon(
+                            Icons.arrow_forward_ios,
+                            color: canGoForward
+                                ? Colors.blue
+                                : Colors.grey.shade400,
+                            size: 22,
+                          ),
                           onPressed: canGoForward
                               ? () => webViewController?.goForward()
                               : null,
-                          child: Icon(
-                            CupertinoIcons.forward,
-                            color: canGoForward
-                                ? CupertinoColors.activeBlue
-                                : CupertinoColors.systemGrey,
-                            size: 28,
-                          ),
                         ),
                         
                         const SizedBox(width: 8),
@@ -127,69 +124,73 @@ class _BrowserAppState extends State<BrowserApp> {
                         // URL TextField
                         Expanded(
                           child: Container(
-                            height: 36,
+                            height: 40,
                             decoration: BoxDecoration(
-                              color: CupertinoColors.systemGrey6,
+                              color: Colors.grey.shade100,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Row(
                               children: [
                                 Padding(
-                                  padding: const EdgeInsets.only(left: 8),
+                                  padding: const EdgeInsets.only(left: 10),
                                   child: Icon(
                                     isSecure
-                                        ? CupertinoIcons.lock_fill
-                                        : CupertinoIcons.info_circle,
+                                        ? Icons.lock
+                                        : Icons.info_outline,
                                     size: 16,
                                     color: isSecure
-                                        ? CupertinoColors.systemGreen
-                                        : CupertinoColors.systemGrey,
+                                        ? Colors.green
+                                        : Colors.grey,
                                   ),
                                 ),
                                 Expanded(
-                                  child: CupertinoTextField(
+                                  child: TextField(
                                     controller: urlController,
-                                    placeholder: 'گەڕان یان ناونیشانی وێبسایت',
-                                    decoration: const BoxDecoration(),
-                                    style: const TextStyle(fontSize: 14),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 8,
+                                    decoration: const InputDecoration(
+                                      hintText: 'گەڕان یان ناونیشان',
+                                      border: InputBorder.none,
+                                      contentPadding: EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 10,
+                                      ),
                                     ),
+                                    style: const TextStyle(fontSize: 14),
                                     onSubmitted: loadUrl,
-                                    clearButtonMode:
-                                        OverlayVisibilityMode.editing,
                                   ),
                                 ),
-                                CupertinoButton(
-                                  padding: const EdgeInsets.only(right: 4),
-                                  minSize: 0,
-                                  onPressed: () =>
-                                      webViewController?.reload(),
-                                  child: const Icon(
-                                    CupertinoIcons.refresh,
-                                    size: 18,
+                                if (isLoading)
+                                  const Padding(
+                                    padding: EdgeInsets.only(right: 8),
+                                    child: SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  )
+                                else
+                                  IconButton(
+                                    icon: const Icon(Icons.refresh, size: 20),
+                                    onPressed: () =>
+                                        webViewController?.reload(),
                                   ),
-                                ),
                               ],
                             ),
                           ),
                         ),
                         
-                        const SizedBox(width: 8),
-                        
                         // Home Button
-                        CupertinoButton(
-                          padding: EdgeInsets.zero,
+                        IconButton(
+                          icon: const Icon(
+                            Icons.home,
+                            color: Colors.blue,
+                            size: 26,
+                          ),
                           onPressed: () {
                             loadUrl("https://www.google.com");
                             urlController.text = "https://www.google.com";
                           },
-                          child: const Icon(
-                            CupertinoIcons.house_fill,
-                            color: CupertinoColors.activeBlue,
-                            size: 24,
-                          ),
                         ),
                       ],
                     ),
@@ -201,227 +202,185 @@ class _BrowserAppState extends State<BrowserApp> {
             // WebView
             Expanded(
               child: InAppWebView(
-                initialUrlRequest: URLRequest(url: WebUri(currentUrl)),
+                initialUrlRequest: URLRequest(
+                  url: WebUri(currentUrl),
+                ),
                 initialSettings: InAppWebViewSettings(
-                  // تایبەتمەندییەکانی بنەڕەتی
+                  // بنەڕەتی
                   javaScriptEnabled: true,
                   domStorageEnabled: true,
                   databaseEnabled: true,
                   
-                  // تایبەتمەندییەکانی Media
+                  // Media
                   allowsInlineMediaPlayback: true,
                   mediaPlaybackRequiresUserGesture: false,
                   
-                  // تایبەتمەندییەکانی Window و Popup
+                  // Windows & Popups
                   javaScriptCanOpenWindowsAutomatically: true,
                   supportMultipleWindows: true,
                   
-                  // Cache و Cookie
+                  // Cache
                   cacheEnabled: true,
                   clearCache: false,
-                  thirdPartyCookiesEnabled: true,
                   
-                  // iOS تایبەتمەندییەکانی تایبەت بە
+                  // iOS تایبەت
                   allowsLinkPreview: true,
                   allowsBackForwardNavigationGestures: true,
-                  allowsPictureInPictureMediaPlayback: true,
-                  isFraudulentWebsiteWarningEnabled: true,
-                  limitsNavigationsToAppBoundDomains: false,
+                  isFraudulentWebsiteWarningEnabled: false,
+                  sharedCookiesEnabled: true,
                   
-                  // User Agent - iPhone 15 Pro
-                  userAgent:
-                      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-                  applicationNameForUserAgent: "",
+                  // User Agent - iOS 16 Safari
+                  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
                   
-                  // Security Settings
-                  useShouldOverrideUrlLoading: true,
+                  // Security
+                  useShouldOverrideUrlLoading: false,
                   allowFileAccessFromFileURLs: false,
                   allowUniversalAccessFromFileURLs: false,
                   
-                  // بۆ Gmail و Google Services پێویستە
-                  geolocationEnabled: true,
+                  // Cookies
+                  thirdPartyCookiesEnabled: true,
                   
-                  // iOS Specific
-                  applePayAPIEnabled: true,
-                  sharedCookiesEnabled: true,
-                  automaticallyAdjustsScrollIndicatorInsets: true,
+                  // سەرنجدان
+                  incognito: false,
                   
-                  // Mixed Content
-                  mixedContentMode:
-                      MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
+                  // Viewport
+                  useWideViewPort: true,
+                  loadWithOverviewMode: true,
+                  
+                  // Zoom
+                  supportZoom: true,
+                  builtInZoomControls: false,
+                  displayZoomControls: false,
+                  
+                  // SSL
+                  mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
                 ),
-                onWebViewCreated: (controller) async {
+                
+                onWebViewCreated: (controller) {
                   webViewController = controller;
-                  
-                  // JavaScript injection بۆ iOS
-                  await controller.evaluateJavascript(source: """
-                    (function() {
-                      // شاردنەوەی Flutter/WebView نیشانەکان
-                      delete window._flutter_inappwebview;
-                      delete window.flutter_inappwebview;
-                      delete window.flutter;
-                      
-                      // iOS Safari properties
-                      Object.defineProperty(navigator, 'webdriver', {
-                        get: () => false
-                      });
-                      
-                      // Platform
-                      Object.defineProperty(navigator, 'platform', {
-                        get: () => 'iPhone'
-                      });
-                      
-                      // Languages
-                      Object.defineProperty(navigator, 'languages', {
-                        get: () => ['en-US', 'en', 'ar', 'ku']
-                      });
-                      
-                      // Touch Events بۆ iOS
-                      window.ontouchstart = function() {};
-                      
-                      // Connection
-                      Object.defineProperty(navigator, 'connection', {
-                        get: () => ({
-                          effectiveType: '4g',
-                          downlink: 10,
-                          rtt: 50,
-                          saveData: false
-                        })
-                      });
-                      
-                      // Plugins - Safari iOS
-                      Object.defineProperty(navigator, 'plugins', {
-                        get: () => []
-                      });
-                      
-                      // بۆ Google OAuth
-                      window.isNativeApp = false;
-                      
-                      // DeviceMemory
-                      Object.defineProperty(navigator, 'deviceMemory', {
-                        get: () => 8
-                      });
-                      
-                      // Hardware Concurrency
-                      Object.defineProperty(navigator, 'hardwareConcurrency', {
-                        get: () => 6
-                      });
-                      
-                      // Max Touch Points - iPhone
-                      Object.defineProperty(navigator, 'maxTouchPoints', {
-                        get: () => 5
-                      });
-                    })();
-                  """);
+                  print("WebView Created Successfully!");
                 },
+                
                 onLoadStart: (controller, url) {
+                  print("Load Start: $url");
                   setState(() {
                     currentUrl = url.toString();
                     urlController.text = currentUrl;
                     isSecure = url.toString().startsWith('https://');
+                    isLoading = true;
                   });
                 },
+                
                 onLoadStop: (controller, url) async {
+                  print("Load Stop: $url");
                   setState(() {
                     currentUrl = url.toString();
                     urlController.text = currentUrl;
                     isSecure = url.toString().startsWith('https://');
+                    isLoading = false;
                   });
 
                   canGoBack = await controller.canGoBack();
                   canGoForward = await controller.canGoForward();
                   setState(() {});
-                  
-                  // JavaScript injection دووبارە
-                  await controller.evaluateJavascript(source: """
-                    (function() {
-                      delete window._flutter_inappwebview;
-                      delete window.flutter_inappwebview;
-                      delete window.flutter;
-                      
-                      // WebGL
-                      const getParameter = WebGLRenderingContext.prototype.getParameter;
-                      WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                        if (parameter === 37445) return 'Apple Inc.';
-                        if (parameter === 37446) return 'Apple GPU';
-                        return getParameter.call(this, parameter);
-                      };
-                      
-                      // Timezone
-                      Intl.DateTimeFormat.prototype.resolvedOptions = function() {
-                        return {timeZone: 'Asia/Baghdad'};
-                      };
-                    })();
-                  """);
                 },
+                
                 onProgressChanged: (controller, progress) {
                   setState(() {
                     this.progress = progress / 100;
                   });
                 },
-                // Gmail Login بۆ پشتگیری لە - Popup Handler
+                
                 onCreateWindow: (controller, createWindowAction) async {
-                  final popupWebView = PopupWebView(
-                    createWindowAction: createWindowAction,
-                    onClose: () {
-                      setState(() {
-                        _popups.removeWhere(
-                          (p) => p.createWindowAction.windowId ==
-                              createWindowAction.windowId,
-                        );
-                      });
-                    },
-                  );
+                  print("Create Window: ${createWindowAction.request.url}");
                   
-                  setState(() {
-                    _popups.add(popupWebView);
-                  });
-                  
-                  // پیشاندانی Popup بە شێوەی Modal
-                  showCupertinoModalPopup(
+                  showModalBottomSheet(
                     context: context,
-                    builder: (context) => popupWebView,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (context) => Container(
+                      height: MediaQuery.of(context).size.height * 0.9,
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(20),
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          // Header
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: Colors.grey.shade300,
+                                ),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Expanded(
+                                  child: Text(
+                                    'لۆگین - Sign In',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.close),
+                                  onPressed: () => Navigator.pop(context),
+                                ),
+                              ],
+                            ),
+                          ),
+                          
+                          // WebView
+                          Expanded(
+                            child: InAppWebView(
+                              windowId: createWindowAction.windowId,
+                              initialSettings: InAppWebViewSettings(
+                                javaScriptEnabled: true,
+                                domStorageEnabled: true,
+                                thirdPartyCookiesEnabled: true,
+                                sharedCookiesEnabled: true,
+                                userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+                              ),
+                              onCloseWindow: (controller) {
+                                Navigator.pop(context);
+                              },
+                              onLoadStop: (controller, url) {
+                                print("Popup loaded: $url");
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   );
                   
                   return true;
                 },
-                shouldOverrideUrlLoading: (controller, navigationAction) async {
-                  final url = navigationAction.request.url.toString();
-                  
-                  // بۆ Gmail OAuth و Google Services
-                  if (url.contains('accounts.google.com') ||
-                      url.contains('oauth') ||
-                      url.contains('signin')) {
-                    return NavigationActionPolicy.ALLOW;
-                  }
-                  
-                  return NavigationActionPolicy.ALLOW;
-                },
+                
                 onPermissionRequest: (controller, request) async {
-                  // هەموو Permissions بدە بۆ Gmail
                   return PermissionResponse(
                     resources: request.resources,
                     action: PermissionResponseAction.GRANT,
                   );
                 },
+                
                 onReceivedError: (controller, request, error) {
-                  debugPrint("Error: ${error.description}");
+                  print("Error: ${error.description}");
                 },
+                
                 onReceivedHttpError: (controller, request, errorResponse) {
-                  debugPrint("HTTP Error: ${errorResponse.statusCode}");
+                  print("HTTP Error: ${errorResponse.statusCode}");
                 },
-                onReceivedServerTrustAuthRequest:
-                    (controller, challenge) async {
-                  // SSL Certificate بۆ Gmail
-                  return ServerTrustAuthResponse(
-                    action: ServerTrustAuthResponseAction.PROCEED,
-                  );
-                },
-                onReceivedHttpAuthRequest: (controller, challenge) async {
-                  // HTTP Authentication
-                  return HttpAuthResponse(
-                    action: HttpAuthResponseAction.PROCEED,
-                  );
+                
+                onConsoleMessage: (controller, consoleMessage) {
+                  print("Console: ${consoleMessage.message}");
                 },
               ),
             ),
@@ -434,149 +393,6 @@ class _BrowserAppState extends State<BrowserApp> {
   @override
   void dispose() {
     urlController.dispose();
-    webViewController?.dispose();
     super.dispose();
-  }
-}
-
-// Popup Window بۆ Gmail Login
-class PopupWebView extends StatefulWidget {
-  final CreateWindowAction createWindowAction;
-  final VoidCallback onClose;
-
-  const PopupWebView({
-    super.key,
-    required this.createWindowAction,
-    required this.onClose,
-  });
-
-  @override
-  State<PopupWebView> createState() => _PopupWebViewState();
-}
-
-class _PopupWebViewState extends State<PopupWebView> {
-  InAppWebViewController? popupController;
-  String currentUrl = "";
-  double progress = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      child: SafeArea(
-        child: Container(
-          height: MediaQuery.of(context).size.height * 0.9,
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(
-            children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        currentUrl.isEmpty ? 'چاوەڕوانبە...' : currentUrl,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    CupertinoButton(
-                      padding: EdgeInsets.zero,
-                      onPressed: () {
-                        widget.onClose();
-                        Navigator.pop(context);
-                      },
-                      child: const Icon(
-                        CupertinoIcons.xmark_circle_fill,
-                        color: CupertinoColors.systemGrey,
-                        size: 28,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              
-              // Progress Bar
-              if (progress < 1.0)
-                LinearProgressIndicator(
-                  value: progress,
-                  backgroundColor: Colors.grey[200],
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
-                  minHeight: 2,
-                ),
-              
-              // WebView
-              Expanded(
-                child: InAppWebView(
-                  windowId: widget.createWindowAction.windowId,
-                  initialSettings: InAppWebViewSettings(
-                    javaScriptEnabled: true,
-                    domStorageEnabled: true,
-                    databaseEnabled: true,
-                    thirdPartyCookiesEnabled: true,
-                    cacheEnabled: true,
-                    clearCache: false,
-                    mediaPlaybackRequiresUserGesture: false,
-                    javaScriptCanOpenWindowsAutomatically: true,
-                    supportMultipleWindows: true,
-                    allowsInlineMediaPlayback: true,
-                    allowsBackForwardNavigationGestures: true,
-                    sharedCookiesEnabled: true,
-                    userAgent:
-                        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-                    applicationNameForUserAgent: "",
-                  ),
-                  onWebViewCreated: (controller) {
-                    popupController = controller;
-                  },
-                  onLoadStart: (controller, url) {
-                    setState(() {
-                      currentUrl = url?.toString() ?? "";
-                    });
-                  },
-                  onLoadStop: (controller, url) {
-                    setState(() {
-                      currentUrl = url?.toString() ?? "";
-                    });
-                  },
-                  onProgressChanged: (controller, progress) {
-                    setState(() {
-                      this.progress = progress / 100;
-                    });
-                  },
-                  onCloseWindow: (controller) {
-                    widget.onClose();
-                    Navigator.pop(context);
-                  },
-                  onPermissionRequest: (controller, request) async {
-                    return PermissionResponse(
-                      resources: request.resources,
-                      action: PermissionResponseAction.GRANT,
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }
